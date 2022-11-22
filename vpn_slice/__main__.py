@@ -71,6 +71,7 @@ def get_default_providers():
             platform = OSError('Your platform, {}, is unsupported'.format(platform))
         )
 
+ip_routes = set()
 
 def net_or_host_param(s):
     if '=' in s:
@@ -114,6 +115,7 @@ def do_pre_init(env, args):
 
 def do_disconnect(env, args):
     global providers
+    global ip_routes
     for pidfile in args.kill:
         try:
             pid = int(open(pidfile).read())
@@ -137,6 +139,12 @@ def do_disconnect(env, args):
         providers.route.remove_route(env.gateway)
     except CalledProcessError:
         print("WARNING: could not delete route to VPN gateway (%s)" % env.gateway, file=stderr)
+
+    for ip in ip_routes:
+        try:
+            providers.firewall.del_change_src(ip, env.myaddr)
+        except Exception:
+            print("WARNING: could not clear SNAT", ip , env.myaddr, file=stderr)
 
     # remove firewall rule blocking incoming traffic
     if 'firewall' in providers and not args.incoming:
@@ -247,9 +255,9 @@ def do_connect(env, args):
 
 def do_post_connect(env, args):
     global providers
+    global ip_routes
     # lookup named hosts for which we need routes and/or host_map entries
     # (the DNS/NBNS servers already have their routes)
-    ip_routes = set()
     host_map = []
 
     if args.ns_hosts:
@@ -296,6 +304,7 @@ def do_post_connect(env, args):
         if args.verbose > 1:
             print("Adding route to %s (for named hosts) through %s." % (ip, env.tundev), file=stderr)
         providers.route.replace_route(ip, dev=env.tundev)
+        providers.firewall.change_src(ip, env.myaddr)
     else:
         providers.route.flush_cache()
         if args.verbose:
