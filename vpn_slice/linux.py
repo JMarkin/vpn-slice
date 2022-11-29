@@ -99,10 +99,13 @@ class IptablesProvider(FirewallProvider):
         self._iptables('-D', 'INPUT', '-i', device, '-m', 'state', '--state', 'RELATED,ESTABLISHED', '-j', 'ACCEPT')
 
     def change_src(self, destination, src):
-        self._iptables('-t', 'nat', '-A', 'POSTROUTING','-j', 'SNAT', '--destination', destination, '--to-source', src)
+        self._iptables('-t', 'nat', '-A', 'POSTROUTING','-j', 'SNAT', '--destination', str(destination),
+                       '--to-source',str(src))
 
     def del_change_src(self, destination, src):
-        self._iptables('-t', 'nat', '-D', 'POSTROUTING','-j', 'SNAT', '--destination', destination, '--to-source', src)
+        self._iptables('-t', 'nat', '-D', 'POSTROUTING','-j', 'SNAT', '--destination', str(destination), '--to-source',
+                       str(src))
+
 
 class CheckTunDevProvider(TunnelPrepProvider):
     def create_tunnel(self):

@@ -9,6 +9,8 @@ from random import choice, randint, shuffle
 from subprocess import CalledProcessError
 from sys import platform, stderr
 from time import sleep
+import json
+
 
 try:
     from setproctitle import setproctitle
@@ -116,6 +118,8 @@ def do_pre_init(env, args):
 def do_disconnect(env, args):
     global providers
     global ip_routes
+
+    print(ip_routes)
     for pidfile in args.kill:
         try:
             pid = int(open(pidfile).read())
@@ -522,6 +526,7 @@ def finalize_args_and_env(args, env):
 
 def main(args=None, environ=os.environ):
     global providers
+    global ip_routes
 
     try:
         p, args, env = parse_args_and_env(args, environ)
@@ -610,6 +615,8 @@ def main(args=None, environ=os.environ):
     elif env.reason == reasons.pre_init:
         do_pre_init(env, args)
     elif env.reason == reasons.disconnect:
+        with open('/tmp/vpn_slice_ips.json', 'r') as f:
+            ip_routes = json.loads(f.read())
         do_disconnect(env, args)
     elif env.reason in (reasons.reconnect, reasons.attempt_reconnect):
         # FIXME: is there anything that reconnect or attempt_reconnect /should/ do
@@ -632,6 +639,9 @@ def main(args=None, environ=os.environ):
             raise SystemExit
 
         do_post_connect(env, args)
+        iptables = [str(i) for i in ip_routes]
+        with open('/tmp/vpn_slice_ips.json', 'w') as f:
+            f.write(json.dumps(iptables))
 
 
 if __name__ == '__main__':
