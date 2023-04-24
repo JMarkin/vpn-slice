@@ -234,6 +234,7 @@ def do_connect(env, args):
         if args.verbose > 1:
             print("Adding route to %s %s through %s." % (tag, dest, env.tundev), file=stderr)
         providers.route.replace_route(dest, dev=env.tundev)
+        providers.firewall.change_src(dest, env.myaddr)
     else:
         providers.route.flush_cache()
         if args.verbose:
