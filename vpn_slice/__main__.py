@@ -10,6 +10,7 @@ from subprocess import CalledProcessError
 from sys import platform, stderr
 from time import sleep
 import json
+from pathlib import Path
 
 
 try:
@@ -74,6 +75,7 @@ def get_default_providers():
         )
 
 ip_routes = set()
+range_routes = set()
 
 def net_or_host_param(s):
     if '=' in s:
@@ -118,8 +120,11 @@ def do_pre_init(env, args):
 def do_disconnect(env, args):
     global providers
     global ip_routes
+    global range_routes
 
+    print(range_routes)
     print(ip_routes)
+
     for pidfile in args.kill:
         try:
             pid = int(open(pidfile).read())
@@ -144,7 +149,7 @@ def do_disconnect(env, args):
     except CalledProcessError:
         print("WARNING: could not delete route to VPN gateway (%s)" % env.gateway, file=stderr)
 
-    for ip in ip_routes:
+    for ip in range_routes | ip_routes:
         try:
             providers.firewall.del_change_src(ip, env.myaddr)
         except Exception:
@@ -166,6 +171,7 @@ def do_disconnect(env, args):
 
 def do_connect(env, args):
     global providers
+    global range_routes
     if args.banner and env.banner:
         print("Connect Banner:")
         for l in env.banner.splitlines(): print("| "+l)
@@ -235,6 +241,7 @@ def do_connect(env, args):
             print("Adding route to %s %s through %s." % (tag, dest, env.tundev), file=stderr)
         providers.route.replace_route(dest, dev=env.tundev)
         providers.firewall.change_src(dest, env.myaddr)
+        range_routes.add(dest)
     else:
         providers.route.flush_cache()
         if args.verbose:
@@ -528,6 +535,7 @@ def finalize_args_and_env(args, env):
 def main(args=None, environ=os.environ):
     global providers
     global ip_routes
+    global range_routes
 
     try:
         p, args, env = parse_args_and_env(args, environ)
@@ -616,8 +624,10 @@ def main(args=None, environ=os.environ):
     elif env.reason == reasons.pre_init:
         do_pre_init(env, args)
     elif env.reason == reasons.disconnect:
-        with open('/tmp/vpn_slice_ips.json', 'r') as f:
-            ip_routes = json.loads(f.read())
+        with open(Path.home() / '.vpn_slice_ips.json', 'r') as f:
+            routes = json.loads(f.read())
+        ip_routes = set(routes["ip"])
+        range_routes = set(routes["range"])
         do_disconnect(env, args)
     elif env.reason in (reasons.reconnect, reasons.attempt_reconnect):
         # FIXME: is there anything that reconnect or attempt_reconnect /should/ do
@@ -640,8 +650,11 @@ def main(args=None, environ=os.environ):
             raise SystemExit
 
         do_post_connect(env, args)
-        iptables = [str(i) for i in ip_routes]
-        with open('/tmp/vpn_slice_ips.json', 'w') as f:
+        iptables = {
+            "range": [str(i) for i in range_routes],
+            "ip": [str(i) for i in ip_routes],
+        }
+        with open(Path.home() / '.vpn_slice_ips.json', 'w') as f:
             f.write(json.dumps(iptables))
 
 
