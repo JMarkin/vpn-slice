@@ -2,6 +2,7 @@ import fcntl
 import os
 import subprocess
 from ipaddress import ip_address
+from itertools import product
 from signal import SIGTERM
 
 from .provider import DNSProvider, HostsProvider, ProcessProvider
@@ -19,7 +20,7 @@ class DigProvider(DNSProvider):
         search_domains = self.search_domains
 
         if not bind_addresses:
-            some_cls = [self.base_cl + ['@{!s}'.format(dns) for dns in dns_servers]]
+            some_cls = [self.base_cl + [f'@{dns!s}' for dns in dns_servers]]
             field_requests = [hostname, 'A', hostname, 'AAAA']
         else:
             some_cls = []
@@ -31,7 +32,7 @@ class DigProvider(DNSProvider):
                 field_requests.extend([hostname, ('AAAA' if bind.version == 6 else 'A')])
 
                 # We can only do a lookup via DNS-over-IPv[X] if we have an IPv[X] address to bind to.
-                matching_dns = ['@{!s}'.format(dns) for dns in dns_servers if dns.version == bind.version]
+                matching_dns = [f'@{dns!s}' for dns in dns_servers if dns.version == bind.version]
                 if matching_dns:
                     some_cls.append(self.base_cl + ['-b', str(bind)] + matching_dns)
 
@@ -42,7 +43,7 @@ class DigProvider(DNSProvider):
         all_cls = []
         if search_domains:
             for cl in some_cls:
-                all_cls.extend(cl + ['+domain={!s}'.format(sd)] + field_requests for sd in search_domains)
+                all_cls.extend(cl + [f'+domain={sd!s}'] + field_requests for sd in search_domains)
         else:
             for cl in some_cls:
                 all_cls.extend([cl + field_requests])
@@ -65,23 +66,46 @@ class DigProvider(DNSProvider):
 
         return result or None
 
+    def lookup_srv(self, query):
+        dns_servers = self.dns_servers
+        bind_addresses = self.bind_addresses
+
+        if not bind_addresses:
+            all_cls = [self.base_cl + [f'@{dns!s}' for dns in dns_servers] + [query, 'SRV']]
+        else:
+            all_cls = [self.base_cl + ['-b', str(bind)] +
+                       [f'@{n!s}' for n in dns_servers if n.version == bind.version] +
+                       [query, 'SRV'] for bind in bind_addresses]
+
+        result = set()
+        for cl in all_cls:
+            p = subprocess.Popen(cl, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            output, stderr = p.communicate()
+            if p.returncode != 0:
+                raise subprocess.CalledProcessError(p.returncode, cl, output=output, stderr=stderr)
+            for line in output.splitlines():
+                bits = line.split()
+                priority, weight, port, name = int(bits[0]), int(bits[1]), int(bits[2]), bits[3].rstrip('.')
+                result.add((priority, weight, name))
+
+        return [r[2] for r in sorted(result)]
+
 
 class HostsFileProvider(HostsProvider):
     def __init__(self, path):
         self.path = path
         if not os.access(path, os.R_OK | os.W_OK):
-            raise OSError('Cannot read/write {}'.format(path))
+            raise OSError(f'Cannot read/write {path}')
 
     def write_hosts(self, host_map, name):
-        tag = 'vpn-slice-{} AUTOCREATED'.format(name)
-        with open(self.path, 'r+') as hostf:
+        tag = f'vpn-slice-{name} AUTOCREATED'
+        with open(self.path, 'r+b') as hostf:
             fcntl.flock(hostf, fcntl.LOCK_EX)  # POSIX only, obviously
             lines = hostf.readlines()
-            keeplines = [l for l in lines if not l.endswith('# %s\n' % tag)]
+            keeplines = [l for l in lines if not l.endswith(f'# {tag}\n'.encode())]
             hostf.seek(0, 0)
             hostf.writelines(keeplines)
-            for ip, names in host_map:
-                print('%s %s\t\t# %s' % (ip, ' '.join(names), tag), file=hostf)
+            hostf.writelines(f"{ip} {' '.join(names)}\t\t# {tag}\n".encode() for ip, names in host_map)
             hostf.truncate()
         return len(host_map) or len(lines) - len(keeplines)
 

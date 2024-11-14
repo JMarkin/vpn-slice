@@ -10,16 +10,16 @@ from .util import get_executable
 class ProcfsProvider(PosixProcessProvider):
     def pid2exe(self, pid):
         try:
-            return os.readlink('/proc/%d/exe' % pid)
-        except (OSError, IOError):
+            return os.readlink(f'/proc/{pid}/exe')
+        except OSError:
             return None
 
     def ppid_of(self, pid=None):
         if pid is None:
             return os.getppid()
         try:
-            return int(next(open('/proc/%d/stat' % pid)).split()[3])
-        except (OSError, ValueError, IOError):
+            return int(next(open(f'/proc/{pid}/stat')).split()[3])
+        except (OSError, ValueError):
             return None
 
 
@@ -67,7 +67,7 @@ class Iproute2Provider(RouteProvider):
             return r
 
     def flush_cache(self):
-        self._iproute('route', 'flush', 'cache')
+        # Starting with Linux version 3.6, there is no routing cache for IPv4.
         self._iproute('-6', 'route', 'flush', 'cache')
 
     def get_link_info(self, device):
